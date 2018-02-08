@@ -134,9 +134,8 @@ void morse_send (const char* msg)
   morse_send (++msg );
 }
 
-void init()
+void init(const char* str)
 {
-  const char* str = "hola mundo";
   int n = 500;
   char buff[n];
 
@@ -156,5 +155,5 @@ void user_init(void)
 {
   // Config pin as GPIO2
   PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO2);
-  xTaskCreate(&init, "startup", 2048, NULL, 1, NULL);
+  xTaskCreate(&init, "startup", 2048, "hola mundo", 1, NULL);
 }
