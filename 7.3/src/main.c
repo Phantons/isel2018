@@ -71,6 +71,7 @@ void enableLED(int time)
 /**
  * Copia en buf la versión en Morse del mensaje str, con un límite de n
  * caracteres.
+ * Retorna la longitud de la string final
  */
 int str2morse (char *buf, int n, const char* str)
 {
@@ -81,7 +82,7 @@ int str2morse (char *buf, int n, const char* str)
     char characterToParse = *str;
     if (characterToParse == ' ')
     {
-      strcat(buf, "    ");
+      strcat(buf, "  ");
     } else {
       const char* morseCode = morse(characterToParse);
 
