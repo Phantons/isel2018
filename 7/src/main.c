@@ -121,7 +121,6 @@ int checkIfPressed(fsm_t* this) {
 }
 
 int checkTimeout(fsm_t* this) {
-  if (getCurrentTime() > timeout)
   return getCurrentTime() > timeout;
 }
 
