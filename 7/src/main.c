@@ -6,10 +6,9 @@
 #define BUTTON_D3 0
 #define PIN_D8 15
 #define LED 2
-#define ALARM_SIGNAL_PORT 5
 #define PERIOD_TICK 100/portTICK_RATE_MS
-#define REBOUND_TIME 300
-#define TIMEOUT 1000
+#define REBOUND_TIME 300/portTICK_RATE_MS
+#define TIMEOUT 1000/portTICK_RATE_MS
 #define ETS_GPIO_INTR_DISABLE() \
   _xt_isr_mask(1 << ETS_GPIO_INUM)
 #define ETS_GPIO_INTR_ENABLE() \
@@ -26,18 +25,18 @@ enum alarm_state {
   DESACT_2,
 };
 
-long reboundTimeout = 0;
-long timeout = 0;
+portTickType reboundTimeout = 0;
+portTickType timeout = 0;
 volatile int counter = 0;
 volatile int pressed = false;
+volatile bool isPresent = false;
 int checkIfPressed(fsm_t*);
 int checkTimeout(fsm_t*);
-void led_on();
+int isSomeoneHere(fsm_t*);
+void led_on(fsm_t*);
 void led_off(fsm_t*);
-void setCounter(fsm_t* this);
-void setPressed(fsm_t* this);
+void clearFlags(fsm_t*);
 void isr_gpio();
-long getCurrentTime();
 
 /******************************************************************************
  * FunctionName : user_rf_cal_sector_set
@@ -83,16 +82,17 @@ uint32 user_rf_cal_sector_set(void)
 }
 
 struct fsm_trans_t alarm[] = {
-  {ALARM_OFF, checkIfPressed, ACT_1, setPressed},
-  {ACT_1, checkIfPressed, ACT_2, setPressed},
-  {ACT_1, checkTimeout, ALARM_OFF, setCounter},
-  {ACT_2, checkIfPressed, ALARM_ON, setPressed},
-  {ACT_2, checkTimeout, ALARM_OFF, setCounter},
-  {ALARM_ON, checkIfPressed, DESACT_1, setPressed},
-  {DESACT_1, checkIfPressed, DESACT_2, setPressed},
-  {DESACT_1, checkTimeout, ALARM_ON, setCounter},
+  {ALARM_OFF, checkIfPressed, ACT_1, clearFlags},
+  {ACT_1, checkIfPressed, ACT_2, clearFlags},
+  {ACT_1, checkTimeout, ALARM_OFF, clearFlags},
+  {ACT_2, checkIfPressed, ALARM_ON, clearFlags},
+  {ACT_2, checkTimeout, ALARM_OFF, clearFlags},
+  {ALARM_ON, checkIfPressed, DESACT_1, clearFlags},
+  {ALARM_ON, isSomeoneHere, ALARM_ON, led_on},
+  {DESACT_1, checkIfPressed, DESACT_2, clearFlags},
+  {DESACT_1, checkTimeout, ALARM_ON, clearFlags},
   {DESACT_2, checkIfPressed, ALARM_OFF, led_off},
-  {DESACT_2, checkTimeout, ALARM_ON, setCounter},
+  {DESACT_2, checkTimeout, ALARM_ON, clearFlags},
   {-1, NULL, -1, NULL},
 };
 
@@ -121,51 +121,42 @@ int checkIfPressed(fsm_t* this) {
 }
 
 int checkTimeout(fsm_t* this) {
-  return getCurrentTime() > timeout;
+  return xTaskGetTickCount() > timeout;
 }
 
-void led_on () {
+int isSomeoneHere(fsm_t* this) {
+  return isPresent;
+}
+
+void led_on (fsm_t* this) {
   GPIO_OUTPUT_SET(LED, 0);
+  clearFlags(this);
 }
 
 void led_off (fsm_t* this) {
   GPIO_OUTPUT_SET(LED, 1);
+  clearFlags(this);
+}
+
+void clearFlags(fsm_t* this) {
   pressed = false;
-}
-
-void setCounter(fsm_t* this) {
-  counter = 0;
-}
-
-void setPressed(fsm_t* this) {
-  pressed = false;
-}
-
-long getCurrentTime() {
-  return xTaskGetTickCount()*portTICK_RATE_MS;
+  isPresent = false;
 }
 
 void isr_gpio() {
   uint32 status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
   static bool isActive = false;
-  long now = getCurrentTime();
+  long now = xTaskGetTickCount();
   // Atencion a la interrupcion del boton de armar/desarmar
   if (status & BIT(BUTTON_D3)) {
     if (now > reboundTimeout) {
       timeout = now + TIMEOUT;
       reboundTimeout = now + REBOUND_TIME;
       pressed = true;
-      counter++;
-      if (counter == 3) {
-        isActive = !isActive;
-        counter = 0;
-      }
     }
     // Atencion a la interrupcion del pin de presencia del intruso
   } else if (status & BIT(PIN_D8)) {
-    if (isActive) {
-      led_on();
-    }
+    isPresent = true;
   }
 
   GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, status);
