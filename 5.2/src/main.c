@@ -15,22 +15,28 @@
 #define PIR_SENSOR 4
 #define LED 2
 #define PERIOD_TICK 100/portTICK_RATE_MS
-#define REBOUND_TIME 200
-#define TIMEOUT_1MIN 60000
+#define REBOUND_TIME 300/portTICK_RATE_MS
+#define TIMEOUT_1MIN 60000/portTICK_RATE_MS
+#define ETS_GPIO_INTR_DISABLE() \
+  _xt_isr_mask(1 << ETS_GPIO_INUM)
+#define ETS_GPIO_INTR_ENABLE() \
+  _xt_isr_unmask(1 << ETS_GPIO_INUM)
 
 enum interruptor_state {
   LED_ON,
   LED_OFF
 };
 
-long reboundTimeout;
-long onTimeout;
-
+portTickType reboundTimeout;
+portTickType onTimeout;
+volatile bool pressed = false;
+volatile bool isPresent = false;
 int checkIfPressedOrPIRSensorDetectSomeone(fsm_t*);
 int checkTimeout(fsm_t*);
 void led_on(fsm_t*);
 void led_off(fsm_t*);
-long getCurrentTime();
+void isr_gpio();
+void clearFlags();
 
 /******************************************************************************
  * FunctionName : user_rf_cal_sector_set
@@ -77,6 +83,7 @@ uint32 user_rf_cal_sector_set(void)
 
 struct fsm_trans_t interruptor[] = {
   {LED_OFF, checkIfPressedOrPIRSensorDetectSomeone, LED_ON, led_on},
+  {LED_ON, checkIfPressedOrPIRSensorDetectSomeone, LED_ON, led_on},
   {LED_ON, checkTimeout, LED_OFF, led_off},
   {-1, NULL, -1, NULL},
 };
@@ -86,6 +93,12 @@ void run(void* ignore)
     fsm_t* interruptor_fsm = fsm_new(interruptor);
     led_off(interruptor_fsm);
 
+    gpio_intr_handler_register((void*)isr_gpio, NULL);
+    gpio_pin_intr_state_set(BUTTON_D3, GPIO_PIN_INTR_NEGEDGE);
+    gpio_pin_intr_state_set(BUTTON_D8, GPIO_PIN_INTR_POSEDGE);
+    gpio_pin_intr_state_set(PIR_SENSOR, GPIO_PIN_INTR_NEGEDGE);
+
+    ETS_GPIO_INTR_ENABLE();
 
     portTickType xLastWakeTime;
     while (true) {
@@ -96,35 +109,45 @@ void run(void* ignore)
 }
 
 int checkIfPressedOrPIRSensorDetectSomeone(fsm_t* this) {
-  return (((!GPIO_INPUT_GET(BUTTON_D3) || GPIO_INPUT_GET(BUTTON_D8)) && getCurrentTime() > reboundTimeout) ||
-    checkIfSomeoneIsPresent());
+  return pressed || isPresent;
 }
 
 int checkTimeout(fsm_t* this) {
-  return getCurrentTime() > onTimeout;
+  return xTaskGetTickCount() > onTimeout;
 }
 
-long getCurrentTime() {
-  return xTaskGetTickCount()*portTICK_RATE_MS;
+void isr_gpio() {
+  uint32 status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
+  static bool isActive = false;
+  long now = xTaskGetTickCount();
+  // Atencion a la interrupcion del boton de encender luz
+  if ((status & BIT(BUTTON_D3)) || status & BIT(BUTTON_D8)) {
+    if (now > reboundTimeout) {
+      reboundTimeout = now + REBOUND_TIME;
+      pressed = true;
+    }
+    // Atencion a la interrupcion del pin del sensor de movimiento
+  } else if (status & BIT(PIR_SENSOR)) {
+    isPresent = true;
+  }
+
+  GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, status);
 }
 
 void led_on (fsm_t* this) {
-  reboundTimeout = getCurrentTime() + REBOUND_TIME;
-  onTimeout = getCurrentTime() + TIMEOUT_1MIN;
+  onTimeout = xTaskGetTickCount() + TIMEOUT_1MIN;
   GPIO_OUTPUT_SET(LED, 0);
+  clearFlags();
 }
 
 void led_off (fsm_t* this) {
-  reboundTimeout = getCurrentTime() + REBOUND_TIME;
   GPIO_OUTPUT_SET(LED, 1);
+  clearFlags();
 }
 
-/**
- * Comprueba si el sensor detecta a alguien en la sala. Leeremos del GIO un 1 cuando
- * alguien este presente y un cero en caso contrario.
- */
-int checkIfSomeoneIsPresent() {
-  return GPIO_INPUT_GET(PIR_SENSOR);
+void clearFlags() {
+  isPresent = false;
+  pressed = false;
 }
 
 /******************************************************************************
@@ -135,17 +158,9 @@ int checkIfSomeoneIsPresent() {
 *******************************************************************************/
 void user_init(void)
 {
-  // Config pin as GPIO2
-  PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO2);
-
-  // Config pin as GPIO4
-  PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO4);
-
   // Config pin as GPIO15
   PIN_FUNC_SELECT (GPIO_PIN_REG_15, FUNC_GPIO15);
 
-  // Config pin as GPIO0
-  PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO0);
 
   xTaskCreate(&run, "startup", 2048, NULL, 1, NULL);
 }
