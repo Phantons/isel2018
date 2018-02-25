@@ -8,22 +8,21 @@
 #define BUTTON_D8 15
 #define LED 2
 #define PERIOD_TICK 100/portTICK_RATE_MS
-#define REBOUND_TIME 200
-#define TIMEOUT_1MIN 60000
+#define REBOUND_TIME 300/portTICK_RATE_MS
+#define TIMEOUT_1MIN 60000/portTICK_RATE_MS
 
 enum interruptor_state {
   LED_ON,
   LED_OFF
 };
 
-long reboundTimeout;
-long onTimeout;
+portTickType reboundTimeout;
+portTickType onTimeout;
 
 int checkIfPressed(fsm_t*);
 int checkTimeout(fsm_t*);
 void led_on(fsm_t*);
 void led_off(fsm_t*);
-long getCurrentTime();
 
 /******************************************************************************
  * FunctionName : user_rf_cal_sector_set
@@ -70,6 +69,7 @@ uint32 user_rf_cal_sector_set(void)
 
 struct fsm_trans_t interruptor[] = {
   {LED_OFF, checkIfPressed, LED_ON, led_on},
+  {LED_ON, checkIfPressed, LED_ON, led_on},
   {LED_ON, checkTimeout, LED_OFF, led_off},
   {-1, NULL, -1, NULL},
 };
@@ -89,25 +89,21 @@ void run(void* ignore)
 }
 
 int checkIfPressed(fsm_t* this) {
-  return ((!GPIO_INPUT_GET(BUTTON_D3) || GPIO_INPUT_GET(BUTTON_D8)) && getCurrentTime() > reboundTimeout);
+  return ((!GPIO_INPUT_GET(BUTTON_D3) || GPIO_INPUT_GET(BUTTON_D8)) && xTaskGetTickCount() > reboundTimeout);
 }
 
 int checkTimeout(fsm_t* this) {
-  return getCurrentTime() > onTimeout;
-}
-
-long getCurrentTime() {
-  return xTaskGetTickCount()*portTICK_RATE_MS;
+  return xTaskGetTickCount() > onTimeout;
 }
 
 void led_on (fsm_t* this) {
-  reboundTimeout = getCurrentTime() + REBOUND_TIME;
-  onTimeout = getCurrentTime() + TIMEOUT_1MIN;
+  reboundTimeout = xTaskGetTickCount() + REBOUND_TIME;
+  onTimeout = xTaskGetTickCount() + TIMEOUT_1MIN;
   GPIO_OUTPUT_SET(LED, 0);
 }
 
 void led_off (fsm_t* this) {
-  reboundTimeout = getCurrentTime() + REBOUND_TIME;
+  reboundTimeout = xTaskGetTickCount() + REBOUND_TIME;
   GPIO_OUTPUT_SET(LED, 1);
 }
 
@@ -119,13 +115,8 @@ void led_off (fsm_t* this) {
 *******************************************************************************/
 void user_init(void)
 {
-  // Config pin as GPIO2
-  PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO2);
   // Config pin as GPIO15
   PIN_FUNC_SELECT (GPIO_PIN_REG_15, FUNC_GPIO15);
-
-  // Config pin as GPIO0
-  PIN_FUNC_SELECT (PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO0);
 
   xTaskCreate(&run, "startup", 2048, NULL, 1, NULL);
 }
