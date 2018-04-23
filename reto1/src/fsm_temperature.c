@@ -44,18 +44,18 @@ void insertValue(temperature_t* lastTemperatureValues, int value) {
   lastTemperatureValues->lastValues[0] = value;
 }
 
-int getLastOne(temperature_t* lastTemperatureValues) {
+float getLastOne(temperature_t* lastTemperatureValues) {
   return lastTemperatureValues->lastValues[0];
 }
 
-int getSlope(temperature_t* lastTemperatureValues) {
+float getSlope(temperature_t* lastTemperatureValues) {
   float sumX = 0.0;
   float sumY = 0.0;
   float xy = 0.0;
   float x2 = 0.0;
   for (int i = 0; i < LAST_TEMP_VALUES; i++) {
     sumY += lastTemperatureValues->lastValues[i];
-    sumX += i*SAMPLING_TIME;
+    sumX += i;
     xy += lastTemperatureValues->lastValues[i]*(i);
     x2 += i*i;
   }
