@@ -13,9 +13,7 @@
 #define TEMP_THRESHOLD_M 23
 #define TEMP_THRESHOLD_H 24
 
-#define LOW_V 0.2
-#define MEDIUM_V 0.5
-#define HIGH_V 0.8
+#define HIGH_V 0.5
 
 #define TIMEOUT 1000/portTICK_RATE_MS
 
@@ -33,7 +31,7 @@ struct temperature_t {
 temperature_t lastTemperatureValues;
 
 void temperature(temperature_t* lastTemperatureValues) {
-  memset(lastTemperatureValues->lastValues, (float)(0.0), sizeof(int)*LAST_TEMP_VALUES);
+  memset(lastTemperatureValues->lastValues, (float)(0.0), sizeof(float)*LAST_TEMP_VALUES);
 }
 
 void insertValue(temperature_t* lastTemperatureValues, int value) {
@@ -79,30 +77,21 @@ int checkIfItsGoesUp(fsm_t* this) {
   bool isGoingUp = false;
 
   int slope =  getSlope(&lastTemperatureValues);
-  int lastOne = getLastOne(&lastTemperatureValues);
+  int lastTemperature = getLastOne(&lastTemperatureValues);
 
 
   switch (this->current_state) {
     case NO_REFRIGERATION:
-      isGoingUp = slope > HIGH_V ||
-        (slope > MEDIUM_V && lastOne > TEMP_THRESHOLD_L) ||
-        (slope > LOW_V && lastOne > TEMP_THRESHOLD_M);
-        break;
+      isGoingUp = slope > HIGH_V || lastTemperature > TEMP_THRESHOLD_L;
+      break;
     case REFRIGERATION_MODE_1:
-    isGoingUp = slope > HIGH_V ||
-      (slope > MEDIUM_V && lastOne > TEMP_THRESHOLD_L) ||
-      (slope > LOW_V && lastOne > TEMP_THRESHOLD_M);
-        break;
+      isGoingUp = (slope > HIGH_V && lastTemperature > TEMP_THRESHOLD_L) || lastTemperature > TEMP_THRESHOLD_M;
+      break;
     case REFRIGERATION_MODE_2:
-    isGoingUp = slope > HIGH_V ||
-      (slope > MEDIUM_V && lastOne > TEMP_THRESHOLD_L) ||
-      (slope > LOW_V && lastOne > TEMP_THRESHOLD_M);
-        break;
+      isGoingUp = (slope > HIGH_V && lastTemperature > TEMP_THRESHOLD_M) || lastTemperature > TEMP_THRESHOLD_H;
+      break;
     case REFRIGERATION_MODE_3:
-    isGoingUp = slope > HIGH_V ||
-      (slope > MEDIUM_V && lastOne > TEMP_THRESHOLD_L) ||
-      (slope > LOW_V && lastOne > TEMP_THRESHOLD_M);
-        break;
+      break;
     default:
       break;
   }
@@ -113,17 +102,18 @@ int checkIfItsGoesUp(fsm_t* this) {
 int checkIfItsGoesDown(fsm_t* this) {
   bool isGoingDown = false;
 
+  int slope =  getSlope(&lastTemperatureValues);
+  int lastTemperature = getLastOne(&lastTemperatureValues);
+
   switch (this->current_state) {
     case NO_REFRIGERATION:
       break;
     case REFRIGERATION_MODE_1:
-      isGoingDown = getLastOne(&lastTemperatureValues) < TEMP_THRESHOLD_L;
+      isGoingDown = lastTemperature < TEMP_THRESHOLD_L && slope < HIGH_V;
       break;
     case REFRIGERATION_MODE_2:
-      isGoingDown = getLastOne(&lastTemperatureValues) < TEMP_THRESHOLD_M;
-      break;
     case REFRIGERATION_MODE_3:
-      isGoingDown = getLastOne(&lastTemperatureValues) < TEMP_THRESHOLD_H;
+      isGoingDown = lastTemperature < TEMP_THRESHOLD_M && slope < HIGH_V;
       break;
     default:
       break;
@@ -147,18 +137,14 @@ void startFans(fsm_t* this) {
   timeout = xTaskGetTickCount() + TIMEOUT;
 }
 
-void stopFans(fsm_t* this) {
-  GPIO_OUTPUT_SET(PORT_FANS, 1);
-  timeout = xTaskGetTickCount() + TIMEOUT;
-}
-
 void openBottomGrids(fsm_t* this) {
   GPIO_OUTPUT_SET(PORT_BOTTOM_GRIDS, 0);
   timeout = xTaskGetTickCount() + TIMEOUT;
 }
 
-void closeBottomGrids(fsm_t* this) {
+void closeBottomGridsAndFans(fsm_t* this) {
   GPIO_OUTPUT_SET(PORT_BOTTOM_GRIDS, 1);
+  GPIO_OUTPUT_SET(PORT_FANS, 1);
   timeout = xTaskGetTickCount() + TIMEOUT;
 }
 
@@ -187,8 +173,8 @@ fsm_new_temperature (int portTopGrids, int portFans, int portBottomGrids)
       {NO_REFRIGERATION, checkIfItsGoesUp, REFRIGERATION_MODE_1, openTopGrids},
       {REFRIGERATION_MODE_1, checkIfItsGoesUp, REFRIGERATION_MODE_2, startFans},
       {REFRIGERATION_MODE_2, checkIfItsGoesUp, REFRIGERATION_MODE_3, openBottomGrids},
-      {REFRIGERATION_MODE_3, checkIfItsGoesDown, REFRIGERATION_MODE_2, closeBottomGrids},
-      {REFRIGERATION_MODE_2, checkIfItsGoesDown, REFRIGERATION_MODE_1, stopFans},
+      {REFRIGERATION_MODE_3, checkIfItsGoesDown, REFRIGERATION_MODE_1, closeBottomGridsAndFans},
+      {REFRIGERATION_MODE_2, checkIfItsGoesDown, REFRIGERATION_MODE_1, closeBottomGridsAndFans},
       {REFRIGERATION_MODE_1, checkIfItsGoesDown, NO_REFRIGERATION, closeTopGrids},
       {-1, NULL, -1, NULL},
     };
